@@ -2,6 +2,7 @@
 #
 # Create ONNX Runtime xcframework from existing builds
 # This script searches for already-built libraries and creates an xcframework
+# Compatible with onnxruntime_swift package requirements
 #
 # Usage: ./create-xcframework-from-existing-builds.sh [Release|Debug|RelWithDebInfo|MinSizeRel]
 #
@@ -305,6 +306,11 @@ if [ $? -eq 0 ]; then
     find "$XCFRAMEWORK_PATH" -name "onnxruntime" -exec ls -lh {} \;
     
     echo -e "\n${GREEN}Integration instructions:${NC}"
+    echo "1. XCFramework automatically used by onnxruntime_swift package"
+    echo "2. Run sync script to update Swift package headers:"
+    echo "   cd ../onnxruntime_swift && ./sync_objc_files.sh"
+    echo ""
+    echo "Direct Xcode integration (alternative):"
     echo "1. Drag onnxruntime.xcframework to your Xcode project"
     echo "2. Add to 'Frameworks, Libraries, and Embedded Content'"
     if [ "$IOS_DEVICE_IS_STATIC" = true ] || [ "$MACOS_IS_STATIC" = true ]; then
@@ -314,12 +320,16 @@ if [ $? -eq 0 ]; then
     fi
     echo ""
     echo "Usage in code:"
-    echo "  #include <onnxruntime/onnxruntime_cxx_api.h>"
+    echo "  Swift: import onnxruntime_swift"
+    echo "  C++: #include <onnxruntime/onnxruntime_cxx_api.h>"
     
     if [ -f "$COREML_HEADER" ]; then
-        echo "  #include <onnxruntime/coreml_provider_factory.h>"
+        echo "  CoreML: #include <onnxruntime/coreml_provider_factory.h>"
         echo ""
-        echo "CoreML setup:"
+        echo "Swift CoreML setup:"
+        echo "  try options.addCoreMLProvider()"
+        echo ""
+        echo "C++ CoreML setup:"
         echo "  OrtSessionOptionsAppendExecutionProvider_CoreML(session_options, 0);"
     fi
 else
