@@ -158,6 +158,21 @@ create_framework() {
         cp "$SCRIPT_DIR/include/onnxruntime/core/session/onnxruntime_c_api.h" "$framework_dir/Headers/"
         cp "$SCRIPT_DIR/include/onnxruntime/core/session/onnxruntime_cxx_api.h" "$framework_dir/Headers/"
         cp "$SCRIPT_DIR/include/onnxruntime/core/session/onnxruntime_cxx_inline.h" "$framework_dir/Headers/"
+        
+        # Copy additional headers needed for C++ compilation
+        if [ -f "$SCRIPT_DIR/include/onnxruntime/core/session/onnxruntime_float16.h" ]; then
+            cp "$SCRIPT_DIR/include/onnxruntime/core/session/onnxruntime_float16.h" "$framework_dir/Headers/"
+            echo -e "${GREEN}onnxruntime_float16.h included${NC}"
+        else
+            echo -e "${YELLOW}Warning: onnxruntime_float16.h not found${NC}"
+        fi
+        
+        if [ -f "$SCRIPT_DIR/include/onnxruntime/core/session/onnxruntime_ep_c_api.h" ]; then
+            cp "$SCRIPT_DIR/include/onnxruntime/core/session/onnxruntime_ep_c_api.h" "$framework_dir/Headers/"
+            echo -e "${GREEN}onnxruntime_ep_c_api.h included${NC}"
+        else
+            echo -e "${YELLOW}Warning: onnxruntime_ep_c_api.h not found${NC}"
+        fi
     else
         echo -e "${RED}Warning: Headers not found in expected location${NC}"
     fi
@@ -180,6 +195,8 @@ framework module onnxruntime {
     header "onnxruntime_c_api.h"
     header "onnxruntime_cxx_api.h" 
     header "onnxruntime_cxx_inline.h"
+    header "onnxruntime_float16.h"
+    header "onnxruntime_ep_c_api.h"
     header "coreml_provider_factory.h"
     
     link "c++"
@@ -196,6 +213,8 @@ framework module onnxruntime {
     header "onnxruntime_c_api.h"
     header "onnxruntime_cxx_api.h" 
     header "onnxruntime_cxx_inline.h"
+    header "onnxruntime_float16.h"
+    header "onnxruntime_ep_c_api.h"
     
     link "c++"
     link framework "Accelerate"
