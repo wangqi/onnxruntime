@@ -38,6 +38,21 @@ else()
 set(CMAKE_CXX_STANDARD 17)
 endif()
 
+# Ensure consistent deployment targets for Apple platforms
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "16.4" CACHE STRING "iOS deployment target" FORCE)
+  set(CMAKE_XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+  message(STATUS "Setting iOS deployment target to ${CMAKE_OSX_DEPLOYMENT_TARGET}")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "tvOS" AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "16.4" CACHE STRING "tvOS deployment target" FORCE)
+  set(CMAKE_XCODE_ATTRIBUTE_TVOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+  message(STATUS "Setting tvOS deployment target to ${CMAKE_OSX_DEPLOYMENT_TARGET}")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "visionOS" AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "1.0" CACHE STRING "visionOS deployment target" FORCE)
+  set(CMAKE_XCODE_ATTRIBUTE_XROS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+  message(STATUS "Setting visionOS deployment target to ${CMAKE_OSX_DEPLOYMENT_TARGET}")
+endif()
+
 if (MSVC)
   #  Make sure Visual Studio sets __cplusplus macro correctly: https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")

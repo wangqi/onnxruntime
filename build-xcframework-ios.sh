@@ -1,16 +1,14 @@
 #!/bin/bash
 #
-# Clean ONNX Runtime xcframework build script (Refactored)
+# Clean ONNX Runtime xcframework build script
 # Based on the proven official build.sh approach with CoreML
 #
 # Builds for:
 # - iOS device (arm64) with CoreML
-# - iOS simulator (arm64) with CPU fallback
 # - macOS (arm64) with CoreML
+# (iOS simulator dropped for simplicity and to avoid CoreML issues)
 #
-# Then delegates XCFramework creation to create-xcframework-from-existing-builds.sh
-#
-# Usage: ./build-xcframework-ios-refactored.sh [Release|Debug|RelWithDebInfo|MinSizeRel]
+# Usage: ./build-xcframework-ios.sh [Release|Debug|RelWithDebInfo|MinSizeRel]
 #        Default: Release
 
 set -e
@@ -33,15 +31,15 @@ if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     echo ""
     echo "Features:"
     echo "- iOS device with CoreML hardware acceleration" 
-    echo "- iOS simulator with CPU fallback"
     echo "- macOS with CoreML (or CPU fallback if CoreML fails)"
-    echo "- Delegates XCFramework creation to create-xcframework-from-existing-builds.sh"
+    echo "- Preserves previous builds to save time"
     echo ""
     echo "To clean previous builds:"
     echo "  ./clean-build.sh --help    # See cleaning options"
     echo "  ./clean-build.sh --all     # Clean everything"
     echo "  ./clean-build.sh --ios     # Clean iOS builds only"
     echo ""
+    echo "Note: iOS simulator is not included to ensure CoreML works properly"
     exit 0
 fi
 
@@ -52,7 +50,6 @@ case "$BUILD_CONFIG" in
         ;;
     *)
         echo "Error: Invalid build configuration '$BUILD_CONFIG'"
-        echo "Valid options: Release, Debug, RelWithDebInfo, MinSizeRel"
         exit 1
         ;;
 esac
@@ -65,157 +62,543 @@ cd "$SCRIPT_DIR"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo -e "${GREEN}Building ONNX Runtime XCFramework (Refactored)${NC}"
+echo -e "${GREEN}Building ONNX Runtime XCFramework with CoreML${NC}"
 echo "Build configuration: $BUILD_CONFIG"
+echo "iOS minimum version: $IOS_MIN_OS_VERSION" 
+echo "macOS minimum version: $MACOS_MIN_OS_VERSION"
+echo "Platforms: iOS device + iOS simulator + macOS"
 
-# Build directories based on configuration
-OUTPUT_DIR="$SCRIPT_DIR/build/$BUILD_CONFIG/frameworks"
-IOS_DEVICE_BUILD_DIR="$SCRIPT_DIR/build/$BUILD_CONFIG/ios_device"
-IOS_SIM_BUILD_DIR="$SCRIPT_DIR/build/$BUILD_CONFIG/ios_simulator"
-MACOS_BUILD_DIR="$SCRIPT_DIR/build/$BUILD_CONFIG/macos_coreml"
+# Note: Not cleaning previous builds automatically to save time
+# Use ./clean-build.sh if you need to clean specific platforms or configurations
+echo -e "${YELLOW}Building (use ./clean-build.sh to clean if needed)...${NC}"
 
-# ============================================================================
-# Build iOS Device
-# ============================================================================
-echo -e "\n${BLUE}=== Building iOS Device (arm64) ===${NC}"
-
-if [ ! -d "$IOS_DEVICE_BUILD_DIR" ]; then
-    echo -e "${YELLOW}Creating iOS device build directory...${NC}"
-    mkdir -p "$IOS_DEVICE_BUILD_DIR"
-    
-    echo -e "${YELLOW}Configuring iOS device build...${NC}"
-    cmake \
-        -S "$SCRIPT_DIR" \
-        -B "$IOS_DEVICE_BUILD_DIR" \
-        -DCMAKE_BUILD_TYPE=$BUILD_CONFIG \
-        -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/cmake/onnxruntime_ios.toolchain.cmake" \
-        -DPLATFORM=OS64 \
-        -DDEPLOYMENT_TARGET=$IOS_MIN_OS_VERSION \
-        -Donnxruntime_USE_COREML=ON \
-        -Donnxruntime_BUILD_SHARED_LIB=OFF \
-        -Donnxruntime_BUILD_APPLE_FRAMEWORK=OFF \
-        -Donnxruntime_USE_XNNPACK=OFF
-        
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}iOS device CMake configuration failed${NC}"
-        exit 1
-    fi
-else
-    echo -e "${YELLOW}iOS device build directory exists, skipping configuration${NC}"
-fi
-
-echo -e "${YELLOW}Building iOS device...${NC}"
-cmake --build "$IOS_DEVICE_BUILD_DIR" --config $BUILD_CONFIG -j$(sysctl -n hw.ncpu)
+# Build for iOS Device (arm64) with CoreML (static libraries)
+echo -e "\n${GREEN}Building for iOS Device (arm64) with CoreML...${NC}"
+./build.sh \
+    --config "$BUILD_CONFIG" \
+    --use_xcode \
+    --ios \
+    --apple_sysroot iphoneos \
+    --osx_arch arm64 \
+    --apple_deploy_target "$IOS_MIN_OS_VERSION" \
+    --use_coreml \
+    --skip_tests \
+    --build_dir "build/${BUILD_CONFIG}/ios_device"
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}iOS device build failed${NC}"
     exit 1
 fi
 
-# ============================================================================
-# Build iOS Simulator
-# ============================================================================
-echo -e "\n${BLUE}=== Building iOS Simulator (arm64) ===${NC}"
-
-if [ ! -d "$IOS_SIM_BUILD_DIR" ]; then
-    echo -e "${YELLOW}Creating iOS simulator build directory...${NC}"
-    mkdir -p "$IOS_SIM_BUILD_DIR"
-    
-    echo -e "${YELLOW}Configuring iOS simulator build...${NC}"
-    cmake \
-        -S "$SCRIPT_DIR" \
-        -B "$IOS_SIM_BUILD_DIR" \
-        -DCMAKE_BUILD_TYPE=$BUILD_CONFIG \
-        -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/cmake/onnxruntime_ios.toolchain.cmake" \
-        -DPLATFORM=SIMULATORARM64 \
-        -DDEPLOYMENT_TARGET=$IOS_MIN_OS_VERSION \
-        -Donnxruntime_USE_COREML=OFF \
-        -Donnxruntime_BUILD_SHARED_LIB=OFF \
-        -Donnxruntime_BUILD_APPLE_FRAMEWORK=OFF \
-        -Donnxruntime_USE_XNNPACK=OFF
-        
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}iOS simulator CMake configuration failed${NC}"
-        exit 1
-    fi
-else
-    echo -e "${YELLOW}iOS simulator build directory exists, skipping configuration${NC}"
-fi
-
-echo -e "${YELLOW}Building iOS simulator...${NC}"
-cmake --build "$IOS_SIM_BUILD_DIR" --config $BUILD_CONFIG -j$(sysctl -n hw.ncpu)
+# Build for iOS Simulator arm64 without CoreML (static libraries)
+echo -e "\n${GREEN}Building for iOS Simulator arm64 without CoreML...${NC}"
+./build.sh \
+    --config "$BUILD_CONFIG" \
+    --use_xcode \
+    --ios \
+    --apple_sysroot iphonesimulator \
+    --osx_arch arm64 \
+    --apple_deploy_target "$IOS_MIN_OS_VERSION" \
+    --skip_tests \
+    --build_dir "build/${BUILD_CONFIG}/ios_simulator"
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}iOS simulator build failed${NC}"
     exit 1
 fi
 
-# ============================================================================
-# Build macOS
-# ============================================================================
-echo -e "\n${BLUE}=== Building macOS (arm64) ===${NC}"
+# Build for macOS (arm64) with CoreML  
+echo -e "\n${GREEN}Building for macOS (arm64) with CoreML...${NC}"
 
-if [ ! -d "$MACOS_BUILD_DIR" ]; then
-    echo -e "${YELLOW}Creating macOS build directory...${NC}"
-    mkdir -p "$MACOS_BUILD_DIR"
+# First try with CoreML
+echo -e "${YELLOW}Attempting macOS build with CoreML...${NC}"
+if ./build.sh \
+    --config "$BUILD_CONFIG" \
+    --build_shared_lib \
+    --parallel \
+    --compile_no_warning_as_error \
+    --skip_submodule_sync \
+    --cmake_extra_defines CMAKE_OSX_ARCHITECTURES=arm64 \
+    --use_coreml \
+    --skip_tests \
+    --build_dir "build/${BUILD_CONFIG}/macos_coreml"; then
     
-    echo -e "${YELLOW}Configuring macOS build...${NC}"
-    cmake \
-        -S "$SCRIPT_DIR" \
-        -B "$MACOS_BUILD_DIR" \
-        -DCMAKE_BUILD_TYPE=$BUILD_CONFIG \
-        -DCMAKE_OSX_ARCHITECTURES=arm64 \
-        -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOS_MIN_OS_VERSION \
-        -Donnxruntime_USE_COREML=ON \
-        -Donnxruntime_BUILD_SHARED_LIB=OFF \
-        -Donnxruntime_BUILD_APPLE_FRAMEWORK=OFF \
-        -Donnxruntime_USE_XNNPACK=OFF
+    echo -e "${GREEN}macOS build with CoreML successful${NC}"
+    MACOS_BUILD_DIR="build/${BUILD_CONFIG}/macos_coreml"
+    MACOS_HAS_COREML=true
+    
+else
+    echo -e "${YELLOW}macOS build with CoreML failed, trying without CoreML...${NC}"
+    
+    # Clean and try without CoreML
+    rm -rf "build/${BUILD_CONFIG}/macos_cpu"
+    
+    if ./build.sh \
+        --config "$BUILD_CONFIG" \
+        --build_shared_lib \
+        --parallel \
+        --compile_no_warning_as_error \
+        --skip_submodule_sync \
+        --cmake_extra_defines CMAKE_OSX_ARCHITECTURES=arm64 \
+        --skip_tests \
+        --build_dir "build/${BUILD_CONFIG}/macos_cpu"; then
         
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}macOS CMake configuration failed${NC}"
+        echo -e "${YELLOW}macOS build without CoreML successful${NC}"
+        MACOS_BUILD_DIR="build/${BUILD_CONFIG}/macos_cpu"
+        MACOS_HAS_COREML=false
+        
+    else
+        echo -e "${RED}macOS build failed even without CoreML${NC}"
+        exit 1
+    fi
+fi
+
+# Create output directory
+OUTPUT_DIR="$SCRIPT_DIR/build/${BUILD_CONFIG}/frameworks"
+mkdir -p "$OUTPUT_DIR"
+
+# Function to find the built library
+find_library() {
+    local build_dir=$1
+    local platform_name=$2
+    
+    echo -e "${YELLOW}Finding library in $build_dir...${NC}"
+    
+    # Look for the library in common locations
+    local lib_path=""
+    for search_path in "$build_dir/$BUILD_CONFIG" "$build_dir/$BUILD_CONFIG-iphoneos" "$build_dir" "$build_dir/Release" "$build_dir/Release-iphoneos"; do
+        if [ -d "$search_path" ]; then
+            # Look for both static and dynamic libraries (including versioned ones)
+            lib_path=$(find "$search_path" \( -name "libonnxruntime.a" -o -name "libonnxruntime.dylib" -o -name "libonnxruntime.*.dylib" \) 2>/dev/null | grep -v "\.dSYM" | grep -v "\.tbd" | head -1)
+            if [ -n "$lib_path" ]; then
+                echo -e "${GREEN}Found $platform_name library: $lib_path${NC}"
+                echo "$lib_path"
+                return 0
+            fi
+        fi
+    done
+    
+    echo -e "${RED}Could not find libonnxruntime library for $platform_name${NC}"
+    echo "Searched in: $build_dir"
+    exit 1
+}
+
+# Function to combine static libraries into a dynamic library
+combine_static_libraries() {
+    local build_dir=$1
+    local platform=$2
+    local min_version=$3
+    local output_lib=$4
+    
+    echo -e "${YELLOW}Combining static libraries for $platform...${NC}"
+    
+    # Create temporary directory
+    local temp_dir="$build_dir/temp"
+    mkdir -p "$temp_dir"
+    
+    # iOS simulator now only builds arm64 (x86_64 is obsolete)
+    if [ "$platform" = "ios-simulator" ]; then
+        echo "Creating combined libraries for iOS simulator (arm64 only)..."
+        
+        # Find all static libraries (exclude libraries that are handled separately in additional_libs)
+        local libs=()
+        while IFS= read -r lib; do
+            libs+=("$lib")
+        done < <(find "$build_dir" -name "libonnxruntime*.a" -o -name "libabsl*.a" -o -name "libkleidiai*.a" -o -name "libonnx*.a" -o -name "libcpuinfo*.a" -o -name "libflatbuffers*.a" | grep -v test | grep -v protoc | sort)
+        
+        if [ ${#libs[@]} -eq 0 ]; then
+            echo -e "${RED}No static libraries found in $build_dir${NC}"
+            return 1
+        fi
+        
+        echo "Found ${#libs[@]} static libraries to combine"
+        
+        # Combine static libraries
+        echo "Creating combined static library..."
+        libtool -static -o "$temp_dir/combined.a" "${libs[@]}" 2>/dev/null
+        
+    else
+        # For single architecture platforms (iOS device, macOS)
+        # Find all static libraries (exclude libraries that are handled separately in additional_libs)
+        local libs=()
+        while IFS= read -r lib; do
+            libs+=("$lib")
+        done < <(find "$build_dir" -name "libonnxruntime*.a" -o -name "libabsl*.a" -o -name "libkleidiai*.a" -o -name "libonnx*.a" -o -name "libcpuinfo*.a" -o -name "libflatbuffers*.a" | grep -v test | grep -v protoc | sort)
+        
+        if [ ${#libs[@]} -eq 0 ]; then
+            echo -e "${RED}No static libraries found in $build_dir${NC}"
+            return 1
+        fi
+        
+        echo "Found ${#libs[@]} static libraries to combine"
+        
+        # Combine static libraries
+        echo "Creating combined static library..."
+        libtool -static -o "$temp_dir/combined.a" "${libs[@]}" 2>/dev/null
+    fi
+    
+    if [ ! -f "$temp_dir/combined.a" ]; then
+        echo -e "${RED}Failed to create combined static library${NC}"
+        return 1
+    fi
+    
+    # Determine SDK and flags based on platform
+    local sdk=""
+    local arch_flags=""
+    local min_version_flag=""
+    local install_name=""
+    
+    case "$platform" in
+        "ios")
+            sdk="iphoneos"
+            arch_flags="-arch arm64"
+            min_version_flag="-mios-version-min=$min_version"
+            install_name="@rpath/onnxruntime.framework/onnxruntime"
+            ;;
+        "ios-simulator")
+            sdk="iphonesimulator"
+            arch_flags="-arch arm64"
+            min_version_flag="-mios-simulator-version-min=$min_version"
+            install_name="@rpath/onnxruntime.framework/onnxruntime"
+            ;;
+        "macos")
+            sdk="macosx"
+            arch_flags="-arch arm64"
+            min_version_flag="-mmacosx-version-min=$min_version"
+            install_name="@rpath/onnxruntime.framework/onnxruntime"
+            ;;
+    esac
+    
+    # Find additional libraries needed
+    local additional_libs=""
+    local search_dirs=("$build_dir")
+    
+    # For iOS simulator, search in both architecture directories
+    if [ "$platform" = "ios-simulator" ]; then
+        search_dirs=("build/${BUILD_CONFIG}/ios_simulator_arm64" "build/${BUILD_CONFIG}/ios_simulator_x86_64")
+    fi
+    
+    # Check if re2 library exists
+    for search_dir in "${search_dirs[@]}"; do
+        local re2_lib=$(find "$search_dir" -name "libre2.a" -o -name "libonnxruntime_re2.a" 2>/dev/null | head -1)
+        if [ -n "$re2_lib" ]; then
+            additional_libs="$additional_libs -Wl,-force_load,$re2_lib"
+            break
+        fi
+    done
+    
+    # Check if protobuf library exists
+    for search_dir in "${search_dirs[@]}"; do
+        local protobuf_lib=$(find "$search_dir" -name "libprotobuf*.a" 2>/dev/null | grep -v "protoc" | head -1)
+        if [ -n "$protobuf_lib" ]; then
+            additional_libs="$additional_libs -Wl,-force_load,$protobuf_lib"
+            break
+        fi
+    done
+    
+    # Check if coreml_proto library exists (only for platforms with CoreML)
+    if [ "$platform" != "ios-simulator" ]; then
+        for search_dir in "${search_dirs[@]}"; do
+            local coreml_proto_lib=$(find "$search_dir" -name "libcoreml_proto.a" 2>/dev/null | head -1)
+            if [ -n "$coreml_proto_lib" ]; then
+                additional_libs="$additional_libs -Wl,-force_load,$coreml_proto_lib"
+                break
+            fi
+        done
+    fi
+    
+    # Create dynamic library from combined static library
+    echo "Creating dynamic library for $platform..."
+    
+    # Base frameworks
+    local framework_flags="-framework Accelerate -framework Foundation"
+    
+    # Add CoreML only for platforms that support it
+    if [ "$platform" != "ios-simulator" ]; then
+        framework_flags="$framework_flags -framework CoreML"
+    fi
+    
+    xcrun -sdk $sdk clang++ -dynamiclib \
+        -isysroot $(xcrun --sdk $sdk --show-sdk-path) \
+        $arch_flags \
+        $min_version_flag \
+        -Wl,-force_load,"$temp_dir/combined.a" \
+        $additional_libs \
+        $framework_flags \
+        -lc++ \
+        -install_name "$install_name" \
+        -o "$output_lib"
+    
+    if [ ! -f "$output_lib" ]; then
+        echo -e "${RED}Failed to create dynamic library${NC}"
+        return 1
+    fi
+    
+    # Clean up
+    rm -rf "$temp_dir"
+    
+    echo -e "${GREEN}Successfully created dynamic library: $output_lib${NC}"
+    return 0
+}
+
+# Function to create framework structure
+create_framework() {
+    local lib_path=$1
+    local platform=$2
+    local min_version=$3
+    local platform_name=$4
+    local has_coreml=${5:-true}
+    
+    local framework_dir="$OUTPUT_DIR/${platform}/onnxruntime.framework"
+    
+    echo -e "${YELLOW}Creating framework structure for $platform (CoreML: $has_coreml)...${NC}"
+    
+    mkdir -p "$framework_dir/Headers"
+    mkdir -p "$framework_dir/Modules"
+    
+    # Copy library
+    echo -e "${YELLOW}Copying library from: $lib_path${NC}"
+    cp "$lib_path" "$framework_dir/onnxruntime"
+    
+    if [ ! -f "$framework_dir/onnxruntime" ]; then
+        echo -e "${RED}Failed to copy library to framework${NC}"
+        exit 1
+    fi
+    
+    # Update the install name (our combined libraries are always dynamic)
+    echo -e "${YELLOW}Updating install name for dynamic library${NC}"
+    install_name_tool -id "@rpath/onnxruntime.framework/onnxruntime" "$framework_dir/onnxruntime"
+    
+    # Copy standard headers
+    local header_base="$SCRIPT_DIR/include/onnxruntime/core/session"
+    if [ ! -f "$header_base/onnxruntime_c_api.h" ]; then
+        echo -e "${RED}Headers not found in $header_base${NC}"
+        exit 1
+    fi
+    
+    cp "$header_base/onnxruntime_c_api.h" "$framework_dir/Headers/"
+    cp "$header_base/onnxruntime_cxx_api.h" "$framework_dir/Headers/"
+    cp "$header_base/onnxruntime_cxx_inline.h" "$framework_dir/Headers/"
+    
+    # Copy additional headers needed for C++ compilation
+    if [ -f "$header_base/onnxruntime_float16.h" ]; then
+        cp "$header_base/onnxruntime_float16.h" "$framework_dir/Headers/"
+        echo -e "${GREEN}onnxruntime_float16.h included${NC}"
+    else
+        echo -e "${YELLOW}Warning: onnxruntime_float16.h not found${NC}"
+    fi
+    
+    if [ -f "$header_base/onnxruntime_ep_c_api.h" ]; then
+        cp "$header_base/onnxruntime_ep_c_api.h" "$framework_dir/Headers/"
+        echo -e "${GREEN}onnxruntime_ep_c_api.h included${NC}"
+    else
+        echo -e "${YELLOW}Warning: onnxruntime_ep_c_api.h not found${NC}"
+    fi
+    
+    # Copy CoreML header only if CoreML is enabled
+    if [ "$has_coreml" = true ]; then
+        cp "$SCRIPT_DIR/include/onnxruntime/core/providers/coreml/coreml_provider_factory.h" "$framework_dir/Headers/"
+    fi
+    
+    # Create module map
+    if [ "$has_coreml" = true ]; then
+        cat > "$framework_dir/Modules/module.modulemap" << EOF
+framework module onnxruntime {
+    header "onnxruntime_c_api.h"
+    header "onnxruntime_cxx_api.h" 
+    header "onnxruntime_cxx_inline.h"
+    header "onnxruntime_float16.h"
+    header "onnxruntime_ep_c_api.h"
+    header "coreml_provider_factory.h"
+    
+    link "c++"
+    link framework "Accelerate"
+    link framework "CoreML"
+    link framework "Foundation"
+    
+    export *
+}
+EOF
+    else
+        cat > "$framework_dir/Modules/module.modulemap" << EOF
+framework module onnxruntime {
+    header "onnxruntime_c_api.h"
+    header "onnxruntime_cxx_api.h" 
+    header "onnxruntime_cxx_inline.h"
+    header "onnxruntime_float16.h"
+    header "onnxruntime_ep_c_api.h"
+    
+    link "c++"
+    link framework "Accelerate"
+    link framework "Foundation"
+    
+    export *
+}
+EOF
+    fi
+
+    # Create Info.plist
+    cat > "$framework_dir/Info.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>onnxruntime</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.microsoft.onnxruntime</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>onnxruntime</string>
+    <key>CFBundlePackageType</key>
+    <string>FMWK</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>MinimumOSVersion</key>
+    <string>$min_version</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>$platform_name</string>
+    </array>
+</dict>
+</plist>
+EOF
+    
+    echo -e "${GREEN}Framework created: $framework_dir${NC}"
+}
+
+# Create frameworks with combined libraries
+echo -e "\n${GREEN}Creating frameworks for XCFramework...${NC}"
+
+# Create iOS Device Framework
+echo -e "\n${YELLOW}Creating iOS Device framework...${NC}"
+IOS_BUILD_DIR="build/${BUILD_CONFIG}/ios_device"
+if [ -d "$IOS_BUILD_DIR" ]; then
+    TEMP_IOS_LIB="$IOS_BUILD_DIR/libonnxruntime_combined.dylib"
+    if combine_static_libraries "$IOS_BUILD_DIR" "ios" "$IOS_MIN_OS_VERSION" "$TEMP_IOS_LIB"; then
+        create_framework "$TEMP_IOS_LIB" "ios-arm64" "$IOS_MIN_OS_VERSION" "iPhoneOS" true
+    else
+        echo -e "${RED}Failed to create iOS device dynamic library${NC}"
         exit 1
     fi
 else
-    echo -e "${YELLOW}macOS build directory exists, skipping configuration${NC}"
-fi
-
-echo -e "${YELLOW}Building macOS...${NC}"
-cmake --build "$MACOS_BUILD_DIR" --config $BUILD_CONFIG -j$(sysctl -n hw.ncpu)
-
-if [ $? -ne 0 ]; then
-    echo -e "${RED}macOS build failed${NC}"
+    echo -e "${RED}iOS device build directory not found${NC}"
     exit 1
 fi
 
-# ============================================================================
-# Delegate XCFramework Creation
-# ============================================================================
-echo -e "\n${GREEN}=== Delegating XCFramework Creation ===${NC}"
-
-# Check if the dedicated script exists
-XCFRAMEWORK_SCRIPT="$SCRIPT_DIR/create-xcframework-from-existing-builds.sh"
-if [ ! -f "$XCFRAMEWORK_SCRIPT" ]; then
-    echo -e "${RED}Error: XCFramework creation script not found: $XCFRAMEWORK_SCRIPT${NC}"
+# Create iOS Simulator Framework  
+echo -e "\n${YELLOW}Creating iOS Simulator framework...${NC}"
+IOS_SIM_BUILD_DIR="build/${BUILD_CONFIG}/ios_simulator"
+if [ -d "$IOS_SIM_BUILD_DIR" ]; then
+    TEMP_IOS_SIM_LIB="$IOS_SIM_BUILD_DIR/libonnxruntime_combined.dylib"
+    if combine_static_libraries "$IOS_SIM_BUILD_DIR" "ios-simulator" "$IOS_MIN_OS_VERSION" "$TEMP_IOS_SIM_LIB"; then
+        create_framework "$TEMP_IOS_SIM_LIB" "ios-arm64-simulator" "$IOS_MIN_OS_VERSION" "iPhoneSimulator" false
+    else
+        echo -e "${RED}Failed to create iOS simulator dynamic library${NC}"
+        exit 1
+    fi
+else
+    echo -e "${RED}iOS simulator build directory not found${NC}"
     exit 1
 fi
 
-# Make sure the script is executable
-chmod +x "$XCFRAMEWORK_SCRIPT"
+# Create macOS Framework
+echo -e "\n${YELLOW}Creating macOS framework...${NC}"
+MACOS_BUILD_DIR_ACTUAL="$MACOS_BUILD_DIR"
+if [ -d "$MACOS_BUILD_DIR_ACTUAL" ]; then
+    TEMP_MACOS_LIB="$MACOS_BUILD_DIR_ACTUAL/libonnxruntime_combined.dylib"
+    if combine_static_libraries "$MACOS_BUILD_DIR_ACTUAL" "macos" "$MACOS_MIN_OS_VERSION" "$TEMP_MACOS_LIB"; then
+        if [ "$MACOS_HAS_COREML" = true ]; then
+            create_framework "$TEMP_MACOS_LIB" "macos-arm64" "$MACOS_MIN_OS_VERSION" "MacOSX" true
+        else
+            create_framework "$TEMP_MACOS_LIB" "macos-arm64" "$MACOS_MIN_OS_VERSION" "MacOSX" false
+        fi
+    else
+        echo -e "${RED}Failed to create macOS dynamic library${NC}"
+        exit 1
+    fi
+else
+    echo -e "${RED}macOS build directory not found${NC}"
+    exit 1
+fi
 
-# Call the dedicated XCFramework creation script
-echo -e "${YELLOW}Calling: $XCFRAMEWORK_SCRIPT $BUILD_CONFIG${NC}"
-"$XCFRAMEWORK_SCRIPT" "$BUILD_CONFIG"
+# Verify frameworks before creating XCFramework
+echo -e "\n${YELLOW}Verifying frameworks...${NC}"
+if [ ! -f "$OUTPUT_DIR/ios-arm64/onnxruntime.framework/onnxruntime" ]; then
+    echo -e "${RED}iOS device framework binary not found${NC}"
+    exit 1
+fi
+if [ ! -f "$OUTPUT_DIR/ios-arm64-simulator/onnxruntime.framework/onnxruntime" ]; then
+    echo -e "${RED}iOS simulator framework binary not found${NC}"
+    exit 1
+fi
+if [ ! -f "$OUTPUT_DIR/macos-arm64/onnxruntime.framework/onnxruntime" ]; then
+    echo -e "${RED}macOS framework binary not found${NC}"
+    exit 1
+fi
 
-# Check the result
+# Create XCFramework
+echo -e "\n${GREEN}Creating XCFramework...${NC}"
+XCFRAMEWORK_PATH="$OUTPUT_DIR/onnxruntime.xcframework"
+
+# Remove existing xcframework if it exists
+rm -rf "$XCFRAMEWORK_PATH"
+
+xcodebuild -create-xcframework \
+    -framework "$OUTPUT_DIR/ios-arm64/onnxruntime.framework" \
+    -framework "$OUTPUT_DIR/ios-arm64-simulator/onnxruntime.framework" \
+    -framework "$OUTPUT_DIR/macos-arm64/onnxruntime.framework" \
+    -output "$XCFRAMEWORK_PATH"
+
 if [ $? -eq 0 ]; then
-    echo -e "\n${GREEN}SUCCESS: Complete build and XCFramework creation finished!${NC}"
-    echo -e "${GREEN}XCFramework was created by: create-xcframework-from-existing-builds.sh${NC}"
-    echo -e "${BLUE}This refactored script eliminates duplicate XCFramework creation logic${NC}"
+    echo -e "\n${GREEN}SUCCESS: XCFramework created!${NC}"
+    echo -e "${GREEN}Location: $XCFRAMEWORK_PATH${NC}"
+    
+    echo -e "${GREEN}XCFramework location: $XCFRAMEWORK_PATH${NC}"
+    
+    # Show info
+    echo -e "\n${YELLOW}Framework info:${NC}"
+    ls -la "$XCFRAMEWORK_PATH"
+    
+    echo -e "\n${YELLOW}Binary sizes:${NC}"
+    find "$XCFRAMEWORK_PATH" -name "onnxruntime" -exec ls -lh {} \;
+    
+    echo -e "\n${GREEN}Integration:${NC}"
+    echo "1. Drag onnxruntime.xcframework to your Xcode project"
+    echo "2. Add to 'Frameworks, Libraries, and Embedded Content'"
+    # Check if libraries are static or dynamic
+    if [[ "$IOS_LIB" == *.a ]] || [[ "$MACOS_LIB" == *.a ]]; then
+        echo "3. Set to 'Do Not Embed' (static library)"
+    else
+        echo "3. Set to 'Embed & Sign' (dynamic library)"
+    fi
+    echo ""
+    echo "Usage in code:"
+    echo "  #include <onnxruntime/onnxruntime_cxx_api.h>"
+    
+    if [ "$MACOS_HAS_COREML" = true ]; then
+        echo "  #include <onnxruntime/coreml_provider_factory.h>  // Available on both iOS and macOS"
+        echo ""
+        echo "CoreML setup (both iOS device and macOS):"
+        echo "  OrtSessionOptionsAppendExecutionProvider_CoreML(session_options, 0);"
+    else
+        echo "  #include <onnxruntime/coreml_provider_factory.h>  // Available on iOS device only"
+        echo ""
+        echo "CoreML setup:"
+        echo "  // iOS device only"
+        echo "  OrtSessionOptionsAppendExecutionProvider_CoreML(session_options, 0);"
+        echo ""
+        echo "Note: macOS build uses CPU only due to CoreML build issues"
+    fi
+    
 else
     echo -e "${RED}XCFramework creation failed${NC}"
-    echo -e "${RED}Error occurred in: create-xcframework-from-existing-builds.sh${NC}"
     exit 1
 fi
