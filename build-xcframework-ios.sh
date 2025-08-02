@@ -275,10 +275,8 @@ combine_static_libraries() {
     local additional_libs=""
     local search_dirs=("$build_dir")
     
-    # For iOS simulator, search in both architecture directories
-    if [ "$platform" = "ios-simulator" ]; then
-        search_dirs=("build/${BUILD_CONFIG}/ios_simulator_arm64" "build/${BUILD_CONFIG}/ios_simulator_x86_64")
-    fi
+    # For iOS simulator, use the same build directory (no separate arch directories needed)
+    # The $build_dir variable already points to the correct directory for each platform
     
     # Check if re2 library exists
     for search_dir in "${search_dirs[@]}"; do
